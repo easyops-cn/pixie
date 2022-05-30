@@ -36,23 +36,26 @@ static __inline enum message_type_t infer_http_message(const char* buf, size_t c
     return kUnknown;
   }
 
-  if (buf[0] == 'H' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'P') {
+  char msg_buf[16];
+  bpf_probe_read(msg_buf, 16, buf);
+
+  if (msg_buf[0] == 'H' && msg_buf[1] == 'T' && msg_buf[2] == 'T' && msg_buf[3] == 'P') {
     return kResponse;
   }
-  if (buf[0] == 'G' && buf[1] == 'E' && buf[2] == 'T') {
+  if (msg_buf[0] == 'G' && msg_buf[1] == 'E' && msg_buf[2] == 'T') {
     return kRequest;
   }
-  if (buf[0] == 'H' && buf[1] == 'E' && buf[2] == 'A' && buf[3] == 'D') {
+  if (msg_buf[0] == 'H' && msg_buf[1] == 'E' && msg_buf[2] == 'A' && msg_buf[3] == 'D') {
     return kRequest;
   }
-  if (buf[0] == 'P' && buf[1] == 'O' && buf[2] == 'S' && buf[3] == 'T') {
+  if (msg_buf[0] == 'P' && msg_buf[1] == 'O' && msg_buf[2] == 'S' && msg_buf[3] == 'T') {
     return kRequest;
   }
-  if (buf[0] == 'P' && buf[1] == 'U' && buf[2] == 'T') {
+  if (msg_buf[0] == 'P' && msg_buf[1] == 'U' && msg_buf[2] == 'T') {
     return kRequest;
   }
-  if (buf[0] == 'D' && buf[1] == 'E' && buf[2] == 'L' && buf[3] == 'E' && buf[4] == 'T' &&
-      buf[5] == 'E') {
+  if (msg_buf[0] == 'D' && msg_buf[1] == 'E' && msg_buf[2] == 'L' && msg_buf[3] == 'E' && msg_buf[4] == 'T' &&
+      msg_buf[5] == 'E') {
     return kRequest;
   }
   // TODO(oazizi): Should we add CONNECT, OPTIONS, TRACE, PATCH?
@@ -212,7 +215,7 @@ static __inline enum message_type_t infer_pgsql_startup_message(const char* buf,
   }
 
   const char kPgsqlVer30[] = "\x00\x03\x00\x00";
-  if (bpf_strncmp((const char*)buf + 4, kPgsqlVer30, 4) != 0) {
+  if (pl_bpf_strncmp((const char*)buf + 4, kPgsqlVer30, 4) != 0) {
     return kUnknown;
   }
 
@@ -623,44 +626,9 @@ static __inline struct protocol_message_t infer_protocol(const char* buf, size_t
   //               role by considering which side called accept() vs connect(). Once the clean-up
   //               above is done, the code below can be turned into a chained ternary.
   // PROTOCOL_LIST: Requires update on new protocols.
+  bool ENABLE_HTTP_TRACING = true;
   if (ENABLE_HTTP_TRACING && (inferred_message.type = infer_http_message(buf, count)) != kUnknown) {
     inferred_message.protocol = kProtocolHTTP;
-  } else if (ENABLE_CQL_TRACING &&
-             (inferred_message.type = infer_cql_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolCQL;
-  } else if (ENABLE_MONGO_TRACING &&
-             (inferred_message.type = infer_mongo_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolMongo;
-  } else if (ENABLE_PGSQL_TRACING &&
-             (inferred_message.type = infer_pgsql_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolPGSQL;
-  } else if (ENABLE_MYSQL_TRACING &&
-             (inferred_message.type = infer_mysql_message(buf, count, conn_info)) != kUnknown) {
-    inferred_message.protocol = kProtocolMySQL;
-  } else if (ENABLE_MUX_TRACING &&
-             (inferred_message.type = infer_mux_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolMux;
-  } else if (ENABLE_KAFKA_TRACING &&
-             (inferred_message.type = infer_kafka_message(buf, count, conn_info)) != kUnknown) {
-    inferred_message.protocol = kProtocolKafka;
-  } else if (ENABLE_DNS_TRACING &&
-             (inferred_message.type = infer_dns_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolDNS;
-  } else if (ENABLE_REDIS_TRACING && is_redis_message(buf, count)) {
-    // For Redis, the message type is left to be kUnknown.
-    // The message types are then inferred via traffic direction and client/server role.
-    inferred_message.protocol = kProtocolRedis;
-  } else if (ENABLE_NATS_TRACING &&
-             (inferred_message.type = infer_nats_message(buf, count)) != kUnknown) {
-    inferred_message.protocol = kProtocolNATS;
-  }
-
-  conn_info->prev_count = count;
-  if (count == 4) {
-    conn_info->prev_buf[0] = buf[0];
-    conn_info->prev_buf[1] = buf[1];
-    conn_info->prev_buf[2] = buf[2];
-    conn_info->prev_buf[3] = buf[3];
   }
 
   return inferred_message;

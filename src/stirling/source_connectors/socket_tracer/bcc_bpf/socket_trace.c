@@ -213,10 +213,7 @@ static __inline bool should_trace_protocol_data(const struct conn_info_t* conn_i
     return false;
   }
 
-  uint32_t protocol = conn_info->protocol;
-  uint64_t kZero = 0;
-  uint64_t control = *control_map.lookup_or_init(&protocol, &kZero);
-  return control & conn_info->role;
+  return true;
 }
 
 static __inline bool is_stirling_tgid(const uint32_t tgid) {
@@ -307,16 +304,16 @@ static __inline void read_sockaddr_kernel(struct conn_info_t* conn_info,
   uint16_t port = -1;
 
   BPF_PROBE_READ_KERNEL_VAR(family, &sk_common->skc_family);
-  BPF_PROBE_READ_KERNEL_VAR(port, &sk_common->skc_dport);
+  BPF_PROBE_READ_KERNEL_VAR(port, &sk_common->skc_num);
 
   conn_info->addr.sa.sa_family = family;
 
   if (family == AF_INET) {
     conn_info->addr.in4.sin_port = port;
-    BPF_PROBE_READ_KERNEL_VAR(conn_info->addr.in4.sin_addr.s_addr, &sk_common->skc_daddr);
+    BPF_PROBE_READ_KERNEL_VAR(conn_info->addr.in4.sin_addr.s_addr, &sk_common->skc_rcv_saddr);
   } else if (family == AF_INET6) {
     conn_info->addr.in6.sin6_port = port;
-    BPF_PROBE_READ_KERNEL_VAR(conn_info->addr.in6.sin6_addr, &sk_common->skc_v6_daddr);
+    BPF_PROBE_READ_KERNEL_VAR(conn_info->addr.in6.sin6_addr, &sk_common->skc_v6_rcv_saddr);
   }
 }
 
@@ -327,7 +324,8 @@ static __inline void submit_new_conn(struct pt_regs* ctx, uint32_t tgid, int32_t
   init_conn_info(tgid, fd, &conn_info);
   if (addr != NULL) {
     conn_info.addr = *((union sockaddr_t*)addr);
-  } else if (socket != NULL) {
+  }
+  if (socket != NULL) {
     read_sockaddr_kernel(&conn_info, socket);
   }
   conn_info.role = role;
@@ -753,14 +751,6 @@ static __inline void process_data(const bool vecs, struct pt_regs* ctx, uint64_t
         perf_submit_iovecs(ctx, direction, args->iov, args->iovlen, bytes_count, conn_info, event);
       }
     }
-  }
-
-  // TODO(oazizi): For conn stats, we should be using the encrypted traffic to do the accounting,
-  //               but that will break things with how we track data positions.
-  //               For now, keep using plaintext data. In the future, this if statement should be:
-  //                     if (!ssl) { ... }
-  if (conn_info->ssl == ssl) {
-    update_conn_stats(ctx, conn_info, direction, bytes_count);
   }
 
   return;
@@ -1559,15 +1549,3 @@ int probe_entry_security_socket_recvmsg(struct pt_regs* ctx) {
   }
   return 0;
 }
-
-// OpenSSL tracing probes.
-#include "src/stirling/source_connectors/socket_tracer/bcc_bpf/openssl_trace.c"
-
-// Go Runtime tracing probes (must precede other Go tracing probes).
-#include "src/stirling/source_connectors/socket_tracer/bcc_bpf/go_runtime_trace.c"
-
-// Go HTTP2 tracing probes.
-#include "src/stirling/source_connectors/socket_tracer/bcc_bpf/go_http2_trace.c"
-
-// GoTLS tracing probes.
-#include "src/stirling/source_connectors/socket_tracer/bcc_bpf/go_tls_trace.c"
