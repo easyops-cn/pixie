@@ -121,7 +121,7 @@ struct close_event_t {
 // * Kernel size limit is 32KiB. See https://github.com/iovisor/bcc/issues/2519 for more details.
 //
 // [1] https://github.com/grpc/grpc-go/blob/master/reflection/serverreflection.go
-#define MAX_MSG_SIZE 30720  // 30KiB
+#define MAX_MSG_SIZE 256  // 30KiB
 
 // This defines how many chunks a perf_submit can support.
 // This applies to messages that are over MAX_MSG_SIZE,
